@@ -573,6 +573,36 @@ function fedora_repository_purge_object_form_submit($form, &$form_state) {
     try {
       $soap_helper = new ConnectionHelper();
       $client = $soap_helper->getSoapClient(variable_get('fedora_soap_manage_url', 'http://localhost:8080/fedora/wsdl?api=API-M'));
+
+      /**
+      *
+      * FBA MODIFICATION BY NBYWELL on 06/03/2014 to remove any link-data
+      * that was created by the Object Linker functionality. This could
+      * be RDFs and entries in the datastreams of linked-to objects.
+      */
+      module_load_include('inc', 'islandora_content_model_forms', 'ObjectLinker');
+      if (variable_get('rdf_relationships', NULL)) {
+        // An unrelated rdf_relationships variable
+        // is present that should be unset. This can happen
+        // when a user loads up an XML-form but never clicks
+        // on the submit button.
+        variable_set('rdf_relationships', NULL);
+      }
+      $content_model_pid = get_object_linker_content_model($pid);
+      if (strlen($content_model_pid) > 0) {
+        $object_linker_form_name = get_object_linker_form_name($pid, $content_model_pid);
+        if (strlen($object_linker_form_name) > 0) {
+          // Build the form so that any link info
+          // is stored in the rdf_relationships
+          // variable.
+          build_object_linker_form($object_linker_form_name);
+          if (variable_get('rdf_relationships', NULL)) {
+            process_links_on_purge($pid);
+            variable_set('rdf_relationships', NULL);
+          }
+        }
+      }
+
       $object = $client->__soapCall('purgeObject', array($params));
       unset($form_state['storage']['confirm']);
     } catch (exception $e) {
@@ -584,7 +614,6 @@ function fedora_repository_purge_object_form_submit($form, &$form_state) {
       }
       return;
     }
-
     // Set the form's redirect to its first identifiable parent collection.
     $form_state['redirect'] = "fedora/repository/$parents[0]/";
   }
@@ -1077,9 +1106,8 @@ function fedora_repository_get_items($pid = NULL, $dsId = NULL, $collection = NU
   module_load_include('inc', 'fedora_repository', 'ObjectHelper');
   module_load_include('inc', 'fedora_repository', 'api/fedora_utils');
   module_load_include('inc', 'fedora_repository', 'api/fedora_item');
-  global $user, $conf;
-  $conf['cache'] = CACHE_DISABLED;
-  
+  global $user;
+
   if (!fedora_available()) {
     drupal_set_message(t('The Fedora repository server is currently unavailable. Please contact the site administrator.'), 'warning', FALSE);
     return '';
